@@ -1,6 +1,6 @@
 {
-  "name": "pi-ps",
-  "version": "2.0.0",
+  "name": "pi-powershell",
+  "version": "2.0.2",
   "description": "Robust PowerShell extension for pi on Windows — token-based bash-to-PS translation, background jobs, diagnostics",
   "keywords": [
     "pi-package",
@@ -36,11 +36,19 @@
   },
   "author": "alessandro@pungitore.ch",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pungggi/pi-ps.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pungggi/pi-ps/issues"
+  },
+  "homepage": "https://github.com/pungggi/pi-ps#readme",
   "engines": {
     "node": ">=18.0.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",

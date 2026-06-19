@@ -1,26 +1,35 @@
 # pi-ps
 
-Robust PowerShell extension for [pi](https://pi.dev) on Windows — token-based bash↔PS translation, background jobs, diagnostics, and local telemetry.
+Robust PowerShell extension for [pi](https://pi.dev) on Windows — token-based
+bash↔PS translation, background jobs, live background windows, diagnostics,
+and local telemetry.
 
-## Why pi-ps?
+Published on npm as **`pi-powershell`** — this is the v2 rewrite of the
+package (1.x used a fragile regex translator). The command is `/pi-ps` and
+the config dir is `~/.pi-ps/`.
 
-The original pi-powershell extension used a fragile regex-based bash→PS translator that broke on quoted args, spaces in paths, and nested pipes. pi-ps fixes all of that:
+## Why?
+
+The earlier 1.x release used a fragile regex-based bash→PS translator that
+broke on quoted args, spaces in paths, and nested pipes. This rewrite fixes
+all of that:
 
 - **Token-based parser** — handles quoted args, multi-pipe chains, redirections, subshells
 - **3 translation modes** — `off` (verbatim), `hint` (tips only), `auto` (rewrite)
 - **Proper kill-tree** — `taskkill /T /F` on abort, not just leader PID
-- **Background job runner** — replaces the whitespace-splitting `run-bg.ps1`
+- **Tracked background jobs** — `/pi-ps job start` runs commands hidden with PID tracking and log files; inspect with `job log`, stop with `job kill`
+- **Live background windows** — `/pi-ps run` opens a visible PowerShell window (the direct successor to `run-bg.ps1`) for commands you want to watch
 - **Open a new PowerShell tab** — `/pi-ps new` and `/pi-ps clone` spawn a
   separate PowerShell session beside pi (real Windows Terminal tab when
   available, otherwise a new window)
 - **Diagnostics** — `pi-ps doctor` for troubleshooting
 - **Local telemetry** — opt-in, privacy-first, never leaves your machine
-- **115+ tests** — translator rules, shell resolution, diagnostics, open-tab
+- **120+ tests** — translator rules, shell resolution, diagnostics, open-tab, visible window
 
 ## Install
 
 ```bash
-pi install ./pi-ps
+pi install npm:pi-powershell
 ```
 
 Or local development:
@@ -39,6 +48,8 @@ pi -e ./src/extension.ts
 | `/pi-ps exec "<cmd>"` | Execute command explicitly through PS |
 | `/pi-ps new` | Open a new PowerShell tab at the standard location |
 | `/pi-ps clone` | Open a new PowerShell tab at pi's current path |
+| `/pi-ps run "<cmd>"` | Run a command in a new **live window** (replaces `run-bg.ps1`) |
+| `/pi-ps job start "<cmd>"` | Start a command as a tracked background job (hidden, logged) |
 | `/pi-ps job list` | List background jobs |
 | `/pi-ps job log <id>` | Show job output |
 | `/pi-ps job kill <id>` | Kill a background job |
@@ -65,6 +76,54 @@ Host detection is automatic:
 
 The tab/window always launches the same PowerShell pi is using (pwsh 7 if
 available, otherwise Windows PowerShell 5.1).
+
+## Running a Command in a New Window
+
+`/pi-ps run "<cmd>"` runs a command in a **separate, visible PowerShell
+window** — the direct successor to the old `run-bg.ps1`. Use it for
+long-running things you want to watch live (dev servers, file watchers,
+tail logs) without them competing with pi for the current terminal:
+
+```
+/pi-ps run "npm run dev"
+/pi-ps run "node server.js --port 3000"
+```
+
+The window stays open for as long as the command runs. The launcher is
+hidden and fire-and-forget, so closing pi does not depend on it.
+
+Prefer **`/pi-ps job start "<cmd>"`** when you want a *hidden*, tracked
+job with its output captured to a log file you can inspect later with
+`/pi-ps job log <id>` and stop with `/pi-ps job kill <id>`.
+
+## Background Jobs
+
+`/pi-ps job start "<cmd>"` runs a command as a **hidden, tracked** background
+process — output is captured to a log file and the process is tracked by a
+stable job id, so you can inspect or stop it later without keeping a window
+open:
+
+```
+/pi-ps job start "npm run build"
+# → Started job job-1718793600001 (PID 12345)
+```
+
+| Command | Action |
+|---------|--------|
+| `/pi-ps job start "<cmd>"` | Start a new background job |
+| `/pi-ps job list` | List tracked jobs (status, PID, command) |
+| `/pi-ps job log <id>` | Show captured output for a job |
+| `/pi-ps job kill <id>` | Kill a running job and its child processes |
+| `/pi-ps job cleanup` | Remove stale job files older than 24h |
+
+Job metadata and logs live under `~/.pi-ps/jobs/` (`<id>.json` and `<id>.log`).
+`job kill` uses `taskkill /T /F` so child processes are cleaned up rather
+than orphaned.
+
+**`run` vs `job start` — when to use which?**
+
+- `/pi-ps run` → you want to **see** it live (dev server, file watcher). Opens a visible window.
+- `/pi-ps job start` → you want it **out of the way** (build, export, long script). Hidden + logged.
 
 ## Translation Modes
 
@@ -192,7 +251,7 @@ npm run test:watch # vitest watch
 npm run typecheck  # tsc --noEmit
 ```
 
-117 tests covering:
+121 tests covering:
 - Tokenizer (quoted args, pipes, redirections, `&&`/`||`, semicolons)
 - Every translation rule (+/- cases)
 - Idempotency (no double-rewrite)
@@ -200,6 +259,8 @@ npm run typecheck  # tsc --noEmit
 - Diagnostics
 - Open-tab (Windows Terminal `new`/`clone`, fallback window, error path,
   path escaping)
+- Visible-window `run` (Start-Process launch, command embedding, quoting,
+  error path)
 
 ## Requirements
 

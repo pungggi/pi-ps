@@ -12,13 +12,13 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolveShell } from "./shell-resolve.js";
+import { resolveShell, type ResolvedShell } from "./shell-resolve.js";
 import { createExecOps } from "./ps-exec.js";
 import { translate, type TranslateMode } from "./translator/index.js";
-import { listJobs, getJobLog, killJob, cleanupJobs } from "./jobs/runner.js";
+import { startJob, listJobs, getJobLog, killJob, cleanupJobs } from "./jobs/runner.js";
 import { runDoctor, formatDoctor, recordTranslation } from "./diagnostics.js";
 import { recordMetric } from "./telemetry.js";
-import { openTab } from "./open-tab.js";
+import { openTab, runInWindow } from "./open-tab.js";
 
 // ── Settings ───────────────────────────────────────────────
 
@@ -174,15 +174,26 @@ export default function piPsExtension(pi: ExtensionAPI): void {
           break;
         }
 
+        case "run": {
+          const cmd = parts.slice(1).join(" ");
+          if (!cmd) {
+            ctx.ui.notify('Usage: /pi-ps run "<command>"  (opens a live window)', "error");
+            break;
+          }
+          const result = await runInWindow({ command: cmd, cwd: ctx.cwd, shell });
+          ctx.ui.notify(`[pi-ps] ${result.message}`, result.ok ? "info" : "error");
+          break;
+        }
+
         case "job": {
-          handleJobCommand(parts.slice(1), ctx);
+          handleJobCommand(parts.slice(1), ctx, shell);
           break;
         }
 
         default: {
           ctx.ui.notify(
             `[pi-ps] Unknown subcommand: ${sub}\n` +
-            `Available: status, doctor, translate, exec, new, clone, job`,
+            `Available: status, doctor, translate, exec, new, clone, run, job`,
             "warning",
           );
         }
@@ -195,10 +206,28 @@ export default function piPsExtension(pi: ExtensionAPI): void {
   function handleJobCommand(
     parts: string[],
     ctx: { cwd: string; ui: { notify: (msg: string, type?: "error" | "info" | "warning") => void } },
+    shell: ResolvedShell,
   ): void {
     const sub = parts[0] ?? "list";
 
     switch (sub) {
+      case "start": {
+        const cmd = parts.slice(1).join(" ");
+        if (!cmd) {
+          ctx.ui.notify('Usage: /pi-ps job start "<command>"', "error");
+          return;
+        }
+        const info = startJob(shell, cmd, ctx.cwd);
+        ctx.ui.notify(
+          `[pi-ps] Started job ${info.id} (PID ${info.pid})\n` +
+          `  Command: ${cmd}\n` +
+          `  Log:  /pi-ps job log ${info.id}\n` +
+          `  Stop: /pi-ps job kill ${info.id}`,
+          "info",
+        );
+        break;
+      }
+
       case "list": {
         const jobs = listJobs();
         if (jobs.length === 0) {
@@ -250,7 +279,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
 
       default:
         ctx.ui.notify(
-          `[pi-ps] Unknown job subcommand: ${sub}\nAvailable: list, log, kill, cleanup`,
+          `[pi-ps] Unknown job subcommand: ${sub}\nAvailable: start, list, log, kill, cleanup`,
           "warning",
         );
     }

@@ -144,3 +144,86 @@ export function openTab(
     child.unref();
   });
 }
+
+// ── Run a command in a new visible window ─────────────────
+
+export interface RunWindowOptions {
+  /** Command to execute in the new window. */
+  command: string;
+  /** Working directory for the new window. */
+  cwd: string;
+  /** Resolved shell to launch. */
+  shell: ResolvedShell;
+}
+
+export interface RunWindowResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Run a command in a new, *visible* PowerShell window (detached).
+ *
+ * Successor to the old run-bg.ps1: `Start-Process -WindowStyle Normal`.
+ * The window stays open for as long as the command runs — ideal for dev
+ * servers you want to watch live. The launcher itself is hidden and
+ * fire-and-forget, independent of the calling pi process.
+ *
+ * Use `startJob()` (the /pi-ps job subsystem) instead when you want a
+ * tracked, hidden job with output captured to a log file.
+ */
+export function runInWindow(
+  opts: RunWindowOptions,
+  spawnImpl: SpawnImpl = defaultSpawn,
+): Promise<RunWindowResult> {
+  return new Promise((resolve) => {
+    const shellExe = opts.shell.exe;
+
+    // Argument line handed to the launched shell: run the command, no profile.
+    const innerArgs = `-NoProfile -Command ${psSingleQuote(opts.command)}`;
+
+    // Launch a visible window running that shell. Works inside Windows
+    // Terminal and in a plain console (opens a new conhost window).
+    const psCommand =
+      `Start-Process -FilePath ${psSingleQuote(shellExe)}` +
+      ` -ArgumentList ${psSingleQuote(innerArgs)}` +
+      ` -WorkingDirectory ${psSingleQuote(opts.cwd)}` +
+      ` -WindowStyle Normal`;
+
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const done = (r: RunWindowResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(r);
+    };
+
+    let child: ChildHandle;
+    try {
+      child = spawnImpl(shellExe, ["-NoProfile", "-Command", psCommand], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch (e) {
+      return done({
+        ok: false,
+        message: `Failed to launch ${shellExe}: ${(e as Error).message}`,
+      });
+    }
+
+    const okMessage = `Running in new window at: ${opts.cwd}\n  ${opts.command}`;
+
+    child.on("error", (err) =>
+      done({ ok: false, message: `Failed to run: ${err.message}` }),
+    );
+    child.on("close", () => done({ ok: true, message: okMessage }));
+
+    // Safety net: the launcher is fire-and-forget; if it neither errors nor
+    // reports close within 2s, assume the target window launched fine.
+    timer = setTimeout(() => done({ ok: true, message: okMessage }), 2000);
+    child.unref();
+  });
+}
