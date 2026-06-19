@@ -89,10 +89,15 @@ export function openTab(
     if (inWindowsTerminal) {
       // ── Windows Terminal: open a real new tab ───────────────
       method = "wt";
+      // -w 0 forces the tab into the most-recently-used window.
+      // Without it, wt.exe spawned as a *detached* child (which is how
+      // we launch it) opens a brand-new window instead of reusing the
+      // current one — see microsoft/terminal#5447. "0" / "last" targets
+      // the MRU window, which is the WT window hosting this pi process.
       // shell:true so cmd resolves wt.exe (an app execution alias).
       const argsLine = clone
-        ? `new-tab -d ${cmdQuote(opts.cwd)} ${cmdQuote(shellExe)}`
-        : `new-tab ${cmdQuote(shellExe)}`;
+        ? `-w 0 new-tab -d ${cmdQuote(opts.cwd)} ${cmdQuote(shellExe)}`
+        : `-w 0 new-tab ${cmdQuote(shellExe)}`;
       try {
         child = spawnImpl(`wt.exe ${argsLine}`, [], {
           detached: true,

@@ -67,6 +67,8 @@ describe("openTab", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].cmd).toContain("wt.exe");
     expect(calls[0].cmd).toContain("new-tab");
+    // -w 0 forces the tab into the existing window instead of a new one.
+    expect(calls[0].cmd).toContain("-w 0");
     expect(calls[0].cmd).toContain(`-d "${CWD}"`);
     expect(calls[0].cmd).toContain(shell.exe);
     expect(calls[0].opts.shell).toBe(true);
@@ -80,6 +82,8 @@ describe("openTab", () => {
 
     expect(res.ok).toBe(true);
     expect(res.method).toBe("wt");
+    // -w 0 forces the tab into the existing window instead of a new one.
+    expect(calls[0].cmd).toContain("-w 0");
     expect(calls[0].cmd).toContain("new-tab");
     expect(calls[0].cmd).not.toContain("-d");
     expect(calls[0].cmd).toContain(shell.exe);

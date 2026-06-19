@@ -68,8 +68,16 @@ command without interrupting pi:
 
 Host detection is automatic:
 
-- **Inside Windows Terminal** (`WT_SESSION` is set) → `wt.exe new-tab`, a real
-  new tab in the current window.
+- **Inside Windows Terminal** (`WT_SESSION` is set) → `wt.exe -w 0 new-tab`,
+  a real new tab in the current window. The `-w 0` (a.k.a. `--window last`)
+  option explicitly targets the most-recently-used WT window; without it,
+  launching `wt.exe` as a detached child opens a brand-new window instead of
+  reusing the current one (see [microsoft/terminal#5447](https://github.com/microsoft/terminal/issues/5447)).
+  > **Note:** `-w 0` targets the *most-recently-used* window, not the window
+  > identified by `WT_SESSION` (the `wt.exe` CLI cannot target windows by
+  > session id). If you have several WT windows open and the MRU one isn't
+  > the one running pi, the new tab will land in the MRU window. Click into
+  > the pi window first to make it MRU.
 - **Otherwise** (plain console / conhost) → `Start-Process pwsh`, a new window
   (there is no tab concept outside Windows Terminal). `new` opens at your home
   directory; `clone` opens at pi's cwd.
