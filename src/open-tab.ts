@@ -174,7 +174,7 @@ export interface RunWindowResult {
  * servers you want to watch live. The launcher itself is hidden and
  * fire-and-forget, independent of the calling pi process.
  *
- * Use `startJob()` (the /pi-ps job subsystem) instead when you want a
+ * Use `startJob()` (the /ps job subsystem) instead when you want a
  * tracked, hidden job with output captured to a log file.
  */
 export function runInWindow(

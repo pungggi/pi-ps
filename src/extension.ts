@@ -89,8 +89,8 @@ export default function piPsExtension(pi: ExtensionAPI): void {
 
   // ── Register commands ───────────────────────────────────
 
-  pi.registerCommand("pi-ps", {
-    description: "pi-ps: show status, doctor, translate, exec, new/clone tab, job management",
+  pi.registerCommand("ps", {
+    description: "ps: show status, doctor, translate, exec, new/clone tab, job management",
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/);
       const sub = parts[0] ?? "";
@@ -104,7 +104,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
             `  Strict: ${settings.strict}\n` +
             `  UTF-8: ${settings.utf8}\n` +
             `  Kill tree: ${settings.killTreeOnAbort}\n` +
-            `  Use /pi-ps doctor for full diagnostics.`,
+            `  Use /ps doctor for full diagnostics.`,
             "info",
           );
           break;
@@ -119,7 +119,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
         case "translate": {
           const cmd = parts.slice(1).join(" ");
           if (!cmd) {
-            ctx.ui.notify("Usage: /pi-ps translate \"<bash command>\"", "error");
+            ctx.ui.notify("Usage: /ps translate \"<bash command>\"", "error");
             break;
           }
           const tResult = translate(cmd, "auto");
@@ -141,7 +141,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
         case "exec": {
           const cmd = parts.slice(1).join(" ");
           if (!cmd) {
-            ctx.ui.notify("Usage: /pi-ps exec \"<command>\"", "error");
+            ctx.ui.notify("Usage: /ps exec \"<command>\"", "error");
             break;
           }
           // H-6: use execOps which streams through pi's onData pipeline
@@ -177,7 +177,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
         case "run": {
           const cmd = parts.slice(1).join(" ");
           if (!cmd) {
-            ctx.ui.notify('Usage: /pi-ps run "<command>"  (opens a live window)', "error");
+            ctx.ui.notify('Usage: /ps run "<command>"  (opens a live window)', "error");
             break;
           }
           const result = await runInWindow({ command: cmd, cwd: ctx.cwd, shell });
@@ -214,15 +214,15 @@ export default function piPsExtension(pi: ExtensionAPI): void {
       case "start": {
         const cmd = parts.slice(1).join(" ");
         if (!cmd) {
-          ctx.ui.notify('Usage: /pi-ps job start "<command>"', "error");
+          ctx.ui.notify('Usage: /ps job start "<command>"', "error");
           return;
         }
         const info = startJob(shell, cmd, ctx.cwd);
         ctx.ui.notify(
           `[pi-ps] Started job ${info.id} (PID ${info.pid})\n` +
           `  Command: ${cmd}\n` +
-          `  Log:  /pi-ps job log ${info.id}\n` +
-          `  Stop: /pi-ps job kill ${info.id}`,
+          `  Log:  /ps job log ${info.id}\n` +
+          `  Stop: /ps job kill ${info.id}`,
           "info",
         );
         break;
@@ -245,7 +245,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
       case "log": {
         const id = parts[1];
         if (!id) {
-          ctx.ui.notify("Usage: /pi-ps job log <id>", "error");
+          ctx.ui.notify("Usage: /ps job log <id>", "error");
           return;
         }
         const log = getJobLog(id);
@@ -260,7 +260,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
       case "kill": {
         const id = parts[1];
         if (!id) {
-          ctx.ui.notify("Usage: /pi-ps job kill <id>", "error");
+          ctx.ui.notify("Usage: /ps job kill <id>", "error");
           return;
         }
         const ok = killJob(id);
