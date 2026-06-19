@@ -1,0 +1,8 @@
+{
+  "_comment": "pi-ps user-extensible alias table. Add your own bash→PS aliases here.",
+  "aliases": {
+    "ll": "Get-ChildItem -Force",
+    "la": "Get-ChildItem -Force -Hidden",
+    "cls": "Clear-Host"
+  }
+}
