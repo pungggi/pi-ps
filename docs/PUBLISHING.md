@@ -39,20 +39,24 @@ release.yml  ──►  npm ci → typecheck → test → version-sync check →
 ### Option A — Trusted Publishing / OIDC (preferred, no long-lived token)
 
 No `NPM_TOKEN`. GitHub Actions proves identity via OIDC (`id-token: write` is
-already in `release.yml`).
+already in `release.yml`). Requires **npm ≥ 11.5.1** (the workflow upgrades
+npm automatically) and **must not** set an empty `NODE_AUTH_TOKEN`.
 
-1. Sign in at [npmjs.com](https://www.npmjs.com) as the package owner.
+1. Sign in at [npmjs.com](https://www.npmjs.com) as the package owner
+   (`ngsoftware`).
 2. Open `https://www.npmjs.com/package/pi-powershell` → **Settings → Trusted Publisher**
    → Add GitHub Actions:
    - **Organization or user:** `pungggi`
    - **Repository:** `pi-ps`
    - **Workflow filename:** `release.yml` (exact name, no path)
    - Environment: leave empty unless you use GitHub Environments
-3. On GitHub, delete a bad token so it cannot override OIDC:
+3. On GitHub, make sure there is **no** `NPM_TOKEN` secret (or it is empty):
    ```bash
+   gh secret list --repo pungggi/pi-ps
+   # if NPM_TOKEN is listed and you want pure OIDC:
    gh secret delete NPM_TOKEN --repo pungggi/pi-ps
    ```
-4. Re-run the release job (see §5).
+4. Re-run the release job (see §4).
 
 Docs: https://docs.npmjs.com/trusted-publishers
 

@@ -42,7 +42,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pungggi/pi-ps.git"
+    "url": "git+https://github.com/pungggi/pi-ps.git"
   },
   "bugs": {
     "url": "https://github.com/pungggi/pi-ps/issues"

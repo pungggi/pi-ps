@@ -8,7 +8,9 @@ name: Release
 #   A) npm Trusted Publishing (OIDC, preferred, no long-lived token)
 #      - On npmjs.com configure this repo + workflow as trusted publisher
 #      - Leave NPM_TOKEN unset (or delete the secret)
-#      - Requires id-token: write (already set below)
+#      - Requires id-token: write + npm >= 11.5.1
+#      - Do NOT leave an empty NODE_AUTH_TOKEN / _authToken= in .npmrc
+#        (that blocks OIDC — see actions/setup-node#1551)
 #
 #   B) Classic Automation token in secrets.NPM_TOKEN
 #      - Must be Classic → Automation (bypasses 2FA)
@@ -34,11 +36,21 @@ jobs:
       id-token: write # OIDC for trusted publishing + provenance
     steps:
       - uses: actions/checkout@v4
+
+      # No registry-url here: setup-node would write
+      #   //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+      # and an empty token silently breaks OIDC trusted publishing.
       - uses: actions/setup-node@v4
         with:
           node-version: 22.x
-          registry-url: https://registry.npmjs.org
           cache: npm
+
+      # Trusted publishing requires npm >= 11.5.1 (and Node >= 22.14).
+      - name: Ensure npm supports OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          node -v
+          npm -v
 
       - run: npm ci
       - run: npm run typecheck
@@ -66,20 +78,30 @@ jobs:
           fi
           echo "✓ versions in sync"
 
-      # Auth mode: if NPM_TOKEN is set, use it; otherwise rely on OIDC trusted publishing.
-      # A token that still requires OTP will fail with EOTP — use Automation or OIDC only.
+      # Auth mode:
+      #   - If secrets.NPM_TOKEN is non-empty → classic token auth
+      #   - Else → OIDC trusted publishing (no .npmrc _authToken line)
+      # Never export an empty NODE_AUTH_TOKEN — that breaks OIDC.
       - name: Publish to npm (with provenance)
+        env:
+          # Keep the raw secret in a differently named var so we can test
+          # emptiness without polluting NODE_AUTH_TOKEN when unset.
+          NPM_TOKEN_SECRET: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "Auth mode: NODE_AUTH_TOKEN (must be Classic Automation or equivalent; OTP-bound tokens fail with EOTP)"
+
+          if [ -n "${NPM_TOKEN_SECRET:-}" ]; then
+            echo "Auth mode: NPM_TOKEN (Classic Automation expected; OTP-bound tokens fail with EOTP)"
+            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN_SECRET}" > "${RUNNER_TEMP}/.npmrc"
+            export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/.npmrc"
           else
             echo "Auth mode: OIDC trusted publishing (no NPM_TOKEN secret)"
-            echo "Ensure npmjs.com → package/user → Trusted Publisher lists:"
+            echo "Ensure npmjs.com → package → Trusted Publisher lists:"
             echo "  repository: pungggi/pi-ps"
             echo "  workflow:   release.yml"
+            # Make sure no empty token leaks into the environment.
+            unset NODE_AUTH_TOKEN || true
+            unset NPM_TOKEN || true
           fi
+
           npm publish --access public --provenance
-        env:
-          # Empty secret → unset so npm can use OIDC instead of a dead token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
