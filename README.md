@@ -19,9 +19,9 @@ all of that:
 - **Proper kill-tree** — `taskkill /T /F` on abort, not just leader PID
 - **Tracked background jobs** — `/ps job start` runs commands hidden with PID tracking and log files; inspect with `job log`, stop with `job kill`
 - **Live background windows** — `/ps run` opens a visible PowerShell window (the direct successor to `run-bg.ps1`) for commands you want to watch
-- **Open a new PowerShell tab** — `/ps new` and `/ps clone` spawn a
-  separate PowerShell session beside pi (real Windows Terminal tab when
-  available, otherwise a new window)
+- **Open a new PowerShell tab** — `/ps new` opens a plain shell; `/ps clone`
+  opens at the same path and starts `pi` (second agent). Real Windows
+  Terminal tab when available, otherwise a new window
 - **Diagnostics** — `pi-ps doctor` for troubleshooting
 - **Local telemetry** — opt-in, privacy-first, never leaves your machine
 - **120+ tests** — translator rules, shell resolution, diagnostics, open-tab, visible window
@@ -47,7 +47,7 @@ pi -e ./src/extension.ts
 | `/ps translate "<cmd>"` | Dry-run translation (shows what would happen) |
 | `/ps exec "<cmd>"` | Execute command explicitly through PS |
 | `/ps new` | Open a new PowerShell tab at the standard location |
-| `/ps clone` | Open a new PowerShell tab at pi's current path |
+| `/ps clone` | Clone path + start `pi` in a new tab (second agent) |
 | `/ps run "<cmd>"` | Run a command in a new **live window** (replaces `run-bg.ps1`) |
 | `/ps job start "<cmd>"` | Start a command as a tracked background job (hidden, logged) |
 | `/ps job list` | List background jobs |
@@ -58,13 +58,12 @@ pi -e ./src/extension.ts
 ## Opening a New PowerShell Tab
 
 Pi occupies your terminal while it runs. `/ps new` and `/ps clone`
-spawn a **separate** PowerShell session beside it so you can run a manual
-command without interrupting pi:
+spawn a **separate** PowerShell session beside it:
 
-| Command | Opens at |
-|---------|----------|
-| `/ps new` | The standard location (your Windows Terminal default profile's starting dir) |
-| `/ps clone` | Pi's current working directory (same path) |
+| Command | Opens at | Starts |
+|---------|----------|--------|
+| `/ps new` | Standard location (WT default profile dir / home) | Plain shell (or `pi` if `PI_PS_RUN_PI=1`) |
+| `/ps clone` | Pi's current working directory (same path) | **`pi` always** — second agent session |
 
 Host detection is automatic:
 
@@ -84,6 +83,19 @@ Host detection is automatic:
 
 The tab/window always launches the same PowerShell pi is using (pwsh 7 if
 available, otherwise Windows PowerShell 5.1).
+
+### Auto-launching pi
+
+**`/ps clone` always launches `pi`** in the new tab/window at the same
+path — flow: open tab → `cd` to pi's cwd → run `pi` (as if you typed it
+and pressed Enter). Use it to spin up a second agent beside the one
+already occupying your terminal.
+
+**`/ps new`** opens a plain interactive shell by default. Set
+`PI_PS_RUN_PI=1` if you also want `/ps new` to launch `pi`.
+
+In both cases the shell runs `-NoExit -Command pi`, so when you quit pi
+the PowerShell session stays open for further commands.
 
 ## Running a Command in a New Window
 
@@ -204,6 +216,7 @@ In `package.json` under `pi.ps`:
       "strict": false,
       "utf8": true,
       "killTreeOnAbort": true,
+      "runPi": false,
       "aliasFile": "~/.pi-ps/aliases.json"
     }
   }
@@ -219,6 +232,7 @@ In `package.json` under `pi.ps`:
 | `PI_PS_STRICT` | 0 | Set `$ErrorActionPreference = 'Stop'` |
 | `PI_PS_UTF8` | 1 | Enable UTF-8 encoding prefix |
 | `PI_PS_KILL_TREE` | 1 | Kill process tree on abort |
+| `PI_PS_RUN_PI` | 0 | Also launch `pi` in `/ps new` tabs (`/ps clone` always launches pi; shell stays open via -NoExit) |
 | `PI_PS_LOAD_PROFILE` | 0 | Load user PS profile (default: -NoProfile) |
 | `PI_PS_ALIAS_FILE` | ~/.pi-ps/aliases.json | Custom alias file |
 | `PI_PS_TELEMETRY` | 0 | Enable local metrics recording |
@@ -259,14 +273,14 @@ npm run test:watch # vitest watch
 npm run typecheck  # tsc --noEmit
 ```
 
-121 tests covering:
+127 tests covering:
 - Tokenizer (quoted args, pipes, redirections, `&&`/`||`, semicolons)
 - Every translation rule (+/- cases)
 - Idempotency (no double-rewrite)
 - Shell resolution
 - Diagnostics
 - Open-tab (Windows Terminal `new`/`clone`, fallback window, error path,
-  path escaping)
+  path escaping, startup command / run-pi)
 - Visible-window `run` (Start-Process launch, command embedding, quoting,
   error path)
 

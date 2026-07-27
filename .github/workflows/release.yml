@@ -1,0 +1,85 @@
+name: Release
+
+# Tag-driven publish: push a `v*.*.*` tag → build, verify, publish with provenance.
+# Manual `npm publish` is blocked by package.json prepublishOnly.
+#
+# Auth (pick ONE — see docs/PUBLISHING.md):
+#
+#   A) npm Trusted Publishing (OIDC, preferred, no long-lived token)
+#      - On npmjs.com configure this repo + workflow as trusted publisher
+#      - Leave NPM_TOKEN unset (or delete the secret)
+#      - Requires id-token: write (already set below)
+#
+#   B) Classic Automation token in secrets.NPM_TOKEN
+#      - Must be Classic → Automation (bypasses 2FA)
+#      - Granular / Publish tokens that require OTP will fail with EOTP
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without leading v)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify package.json version matches tag
+        run: |
+          TAG="${{ steps.ver.outputs.version }}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag version:    $TAG"
+          echo "package.json:   $PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "✖ version drift: tag '$TAG' != package.json '$PKG'"
+            echo "Fix: npm version $TAG -m 'release: %s' && git push origin master --follow-tags"
+            exit 1
+          fi
+          echo "✓ versions in sync"
+
+      # Auth mode: if NPM_TOKEN is set, use it; otherwise rely on OIDC trusted publishing.
+      # A token that still requires OTP will fail with EOTP — use Automation or OIDC only.
+      - name: Publish to npm (with provenance)
+        run: |
+          set -euo pipefail
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "Auth mode: NODE_AUTH_TOKEN (must be Classic Automation or equivalent; OTP-bound tokens fail with EOTP)"
+          else
+            echo "Auth mode: OIDC trusted publishing (no NPM_TOKEN secret)"
+            echo "Ensure npmjs.com → package/user → Trusted Publisher lists:"
+            echo "  repository: pungggi/pi-ps"
+            echo "  workflow:   release.yml"
+          fi
+          npm publish --access public --provenance
+        env:
+          # Empty secret → unset so npm can use OIDC instead of a dead token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

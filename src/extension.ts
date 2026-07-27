@@ -28,6 +28,7 @@ interface PsSettings {
   strict: boolean;
   utf8: boolean;
   killTreeOnAbort: boolean;
+  runPi: boolean;
   aliasFile: string;
 }
 
@@ -43,6 +44,7 @@ function loadSettings(_pi: ExtensionAPI): PsSettings {
     strict: process.env.PI_PS_STRICT === "1",
     utf8: process.env.PI_PS_UTF8 !== "0",
     killTreeOnAbort: process.env.PI_PS_KILL_TREE !== "0",
+    runPi: process.env.PI_PS_RUN_PI === "1",
     aliasFile: process.env.PI_PS_ALIAS_FILE ?? "~/.pi-ps/aliases.json",
   };
 }
@@ -104,6 +106,8 @@ export default function piPsExtension(pi: ExtensionAPI): void {
             `  Strict: ${settings.strict}\n` +
             `  UTF-8: ${settings.utf8}\n` +
             `  Kill tree: ${settings.killTreeOnAbort}\n` +
+            `  Clone runs pi: always\n` +
+            `  New runs pi: ${settings.runPi}\n` +
             `  Use /ps doctor for full diagnostics.`,
             "info",
           );
@@ -169,7 +173,16 @@ export default function piPsExtension(pi: ExtensionAPI): void {
 
         case "new":
         case "clone": {
-          const result = await openTab({ mode: sub, cwd: ctx.cwd, shell });
+          // clone always spins up a second pi agent at the same path
+          // (terminal → cwd → pi → Enter). new stays a plain shell unless
+          // runPi / PI_PS_RUN_PI is on. -NoExit keeps PS open after pi exits.
+          const launchPi = sub === "clone" || settings.runPi;
+          const result = await openTab({
+            mode: sub,
+            cwd: ctx.cwd,
+            shell,
+            ...(launchPi ? { command: "pi" } : {}),
+          });
           ctx.ui.notify(`[pi-ps] ${result.message}`, result.ok ? "info" : "error");
           break;
         }

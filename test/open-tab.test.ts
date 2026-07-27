@@ -136,6 +136,86 @@ describe("openTab", () => {
     // Single quote doubled → '' inside the single-quoted string.
     expect(psCmd).toContain(`'C:\\a''b\\dir'`);
   });
+
+  // ── Startup command (run pi) ────────────────────────────
+
+  it("clone in Windows Terminal runs the startup command when set", async () => {
+    process.env.WT_SESSION = "session-id";
+    const { spawnImpl, calls } = makeFake();
+
+    const res = await openTab({ mode: "clone", cwd: CWD, shell, command: "pi" }, spawnImpl);
+
+    expect(res.ok).toBe(true);
+    expect(res.method).toBe("wt");
+    const cmd = calls[0].cmd;
+    expect(cmd).toContain(`-d "${CWD}"`);
+    expect(cmd).toContain(shell.exe);
+    // -NoExit -Command "pi" appended after the shell executable.
+    expect(cmd).toContain("-NoExit");
+    expect(cmd).toContain("-Command");
+    expect(cmd).toContain('"pi"');
+    expect(res.message).toContain("running pi");
+  });
+
+  it("new in Windows Terminal runs the startup command at the standard location", async () => {
+    process.env.WT_SESSION = "session-id";
+    const { spawnImpl, calls } = makeFake();
+
+    await openTab({ mode: "new", cwd: CWD, shell, command: "pi" }, spawnImpl);
+
+    const cmd = calls[0].cmd;
+    expect(cmd).toContain("new-tab");
+    // No explicit dir for "new" — opens at the WT default profile dir.
+    expect(cmd).not.toContain("-d");
+    expect(cmd).toContain("-NoExit");
+    expect(cmd).toContain("-Command");
+    expect(cmd).toContain('"pi"');
+  });
+
+  it("clone fallback passes the startup command via -ArgumentList", async () => {
+    const { spawnImpl, calls } = makeFake();
+
+    await openTab({ mode: "clone", cwd: CWD, shell, command: "pi" }, spawnImpl);
+
+    const psCmd = calls[0].args.join(" ");
+    expect(psCmd).toContain("Start-Process");
+    expect(psCmd).toContain("-ArgumentList");
+    expect(psCmd).toContain("-NoExit -Command pi");
+    expect(psCmd).toContain(`-WorkingDirectory '${CWD}'`);
+  });
+
+  it("new fallback passes the startup command alongside the home directory", async () => {
+    const { spawnImpl, calls } = makeFake();
+
+    await openTab({ mode: "new", cwd: CWD, shell, command: "pi" }, spawnImpl);
+
+    const psCmd = calls[0].args.join(" ");
+    expect(psCmd).toContain("-ArgumentList");
+    expect(psCmd).toContain("-NoExit -Command pi");
+    expect(psCmd).toContain(`-WorkingDirectory '${homedir()}'`);
+  });
+
+  it("omits startup command flags when no command is given (WT)", async () => {
+    process.env.WT_SESSION = "session-id";
+    const { spawnImpl, calls } = makeFake();
+
+    const res = await openTab({ mode: "new", cwd: CWD, shell }, spawnImpl);
+
+    const cmd = calls[0].cmd;
+    expect(cmd).not.toContain("-NoExit");
+    expect(cmd).not.toContain("-Command");
+    expect(res.message).not.toContain("running");
+  });
+
+  it("omits startup command flags when no command is given (fallback)", async () => {
+    const { spawnImpl, calls } = makeFake();
+
+    await openTab({ mode: "clone", cwd: CWD, shell }, spawnImpl);
+
+    const psCmd = calls[0].args.join(" ");
+    expect(psCmd).not.toContain("-ArgumentList");
+    expect(psCmd).not.toContain("-NoExit");
+  });
 });
 
 describe("runInWindow", () => {

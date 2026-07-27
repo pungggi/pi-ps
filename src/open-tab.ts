@@ -29,6 +29,12 @@ export interface OpenTabOptions {
   cwd: string;
   /** resolved shell to launch (guarantees a PowerShell tab). */
   shell: ResolvedShell;
+  /**
+   * Optional command to run on startup (e.g. "pi"). When set, the new
+   * shell runs the command via `-NoExit -Command <command>` so it stays
+   * open after the command exits. Omit for a plain interactive shell.
+   */
+  command?: string;
 }
 
 export interface OpenTabResult {
@@ -95,9 +101,15 @@ export function openTab(
       // current one — see microsoft/terminal#5447. "0" / "last" targets
       // the MRU window, which is the WT window hosting this pi process.
       // shell:true so cmd resolves wt.exe (an app execution alias).
+      // When a startup command is requested, append it after the shell
+      // executable so the new tab runs it on launch. -NoExit keeps the
+      // shell open after the command exits (e.g. after quitting pi).
+      const cmdSuffix = opts.command
+        ? ` -NoExit -Command ${cmdQuote(opts.command)}`
+        : "";
       const argsLine = clone
-        ? `-w 0 new-tab -d ${cmdQuote(opts.cwd)} ${cmdQuote(shellExe)}`
-        : `-w 0 new-tab ${cmdQuote(shellExe)}`;
+        ? `-w 0 new-tab -d ${cmdQuote(opts.cwd)} ${cmdQuote(shellExe)}${cmdSuffix}`
+        : `-w 0 new-tab ${cmdQuote(shellExe)}${cmdSuffix}`;
       try {
         child = spawnImpl(`wt.exe ${argsLine}`, [], {
           detached: true,
@@ -116,8 +128,14 @@ export function openTab(
       // ── Fallback: open a new console window ─────────────────
       method = "window";
       const dir = clone ? opts.cwd : homedir();
+      // Optional startup command passed as the launched shell's args.
+      // -NoExit keeps the shell open after the command exits.
+      const argList = opts.command
+        ? `-NoExit -Command ${opts.command}`
+        : "";
       const psCommand =
         `Start-Process -FilePath ${psSingleQuote(shellExe)}` +
+        (argList ? ` -ArgumentList ${psSingleQuote(argList)}` : "") +
         ` -WorkingDirectory ${psSingleQuote(dir)}`;
       try {
         child = spawnImpl(shellExe, ["-NoProfile", "-Command", psCommand], {
@@ -136,7 +154,8 @@ export function openTab(
 
     const where = clone ? `at: ${opts.cwd}` : "(standard location)";
     const kind = method === "wt" ? "tab" : "window";
-    const okMessage = `Opened new PowerShell ${kind} ${where}`;
+    const withCmd = opts.command ? ` — running ${opts.command}` : "";
+    const okMessage = `Opened new PowerShell ${kind} ${where}${withCmd}`;
 
     child.on("error", (err) =>
       done({ ok: false, method, message: `Failed to open: ${err.message}` }),

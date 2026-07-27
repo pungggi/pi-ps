@@ -1,7 +1,7 @@
 {
   "name": "pi-powershell",
-  "version": "3.0.0",
-  "description": "Robust PowerShell extension for pi on Windows — token-based bash-to-PS translation, background jobs, diagnostics",
+  "version": "3.1.0",
+  "description": "Robust PowerShell extension for pi on Windows — token-based bash-to-PS translation, background jobs, /ps clone starts pi, diagnostics",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -13,13 +13,16 @@
   "files": [
     "src",
     "aliases.json",
-    "README.md"
+    "docs",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && vitest run"
+    "check": "tsc --noEmit && vitest run",
+    "prepublishOnly": "node -e \"if(!process.env.CI)throw new Error('publish via release.yml CI: push a v* tag. Manual npm publish is blocked to guarantee provenance + version sync.')\""
   },
   "pi": {
     "ps": {
@@ -28,6 +31,7 @@
       "strict": false,
       "utf8": true,
       "killTreeOnAbort": true,
+      "runPi": false,
       "aliasFile": "~/.pi-ps/aliases.json"
     },
     "extensions": [
@@ -42,6 +46,10 @@
   },
   "bugs": {
     "url": "https://github.com/pungggi/pi-ps/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "homepage": "https://github.com/pungggi/pi-ps#readme",
   "engines": {
