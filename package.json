@@ -1,13 +1,16 @@
 {
   "name": "pi-powershell",
   "version": "3.1.0",
-  "description": "Robust PowerShell extension for pi on Windows — token-based bash-to-PS translation, background jobs, /ps clone starts pi, diagnostics",
+  "description": "Robust PowerShell extension for pi on Windows — token-based bash-to-PS translation, background jobs, /ps clone starts pi, diagnostics, persistent note+git context feed",
   "keywords": [
     "pi-package",
     "pi-extension",
     "powershell",
     "windows",
-    "bash-to-powershell"
+    "bash-to-powershell",
+    "note",
+    "git",
+    "context"
   ],
   "type": "module",
   "files": [

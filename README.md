@@ -2,7 +2,7 @@
 
 Robust PowerShell extension for [pi](https://pi.dev) on Windows — token-based
 bash↔PS translation, background jobs, live background windows, diagnostics,
-and local telemetry.
+local telemetry, and a **persistent note + git status feed** into the agent.
 
 Published on npm as **`pi-powershell`** — this is the v2 rewrite of the
 package (1.x used a fragile regex translator). The command is `/ps` and
@@ -24,7 +24,10 @@ all of that:
   Terminal tab when available, otherwise a new window
 - **Diagnostics** — `pi-ps doctor` for troubleshooting
 - **Local telemetry** — opt-in, privacy-first, never leaves your machine
-- **120+ tests** — translator rules, shell resolution, diagnostics, open-tab, visible window
+- **Note + git context feed** — injects a timestamped project/global note and
+  compact git status at startup, on every turn, and whenever the note file
+  changes (`/note`, also `/ps note`)
+- **140+ tests** — translator rules, shell resolution, diagnostics, open-tab, visible window, note
 
 ## Install
 
@@ -54,6 +57,52 @@ pi -e ./src/extension.ts
 | `/ps job log <id>` | Show job output |
 | `/ps job kill <id>` | Kill a background job |
 | `/ps job cleanup` | Remove stale job files |
+| `/note` / `/ps note` | Show the current note + git payload |
+| `/note set <text>` | Replace the note body and inject |
+| `/note append <text>` | Append a line and inject |
+| `/note clear` | Empty the note file |
+| `/note edit` | Open note in `$EDITOR` / notepad |
+| `/note path` | Show active / project / global paths |
+| `/note reload` | Force re-read + inject |
+| `/note git on\|off` | Toggle the git block (session-local) |
+
+## Note + git context feed
+
+The agent is no longer blind to your scratchpad or branch state. pi-ps feeds a
+timestamped note (plus compact git status) into the **LLM context**:
+
+```
+[pi-ps note · 2026-03-30T18:42:11+02:00 · project]
+git: note ↑1 +0 ~1 -0 !
+
+Ship via tag only — never npm publish from the laptop.
+```
+
+| Event | Action |
+|-------|--------|
+| Session start | Read note + git → inject (`nextTurn`, no wake) |
+| Note file change | Re-read → inject with new timestamp (silent by default) |
+| Every agent turn | Attach current payload via `before_agent_start` |
+| After tools / turn end | Refresh git quietly (picked up on next turn) |
+| Context build | Drop all but the newest `pi-ps-note` message |
+
+**Note file locations** (first match wins):
+
+| Priority | Path |
+|----------|------|
+| 1 | `$PI_PS_NOTE_PATH` |
+| 2 | `<cwd>/.pi/note.md` (project — wins if the file exists) |
+| 3 | `~/.pi-ps/note.md` (global) |
+
+`/note set` and `/note edit` write the **project** note by default (unless an
+override is set), so notes stay repo-local.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_PS_NOTE_PATH` | *(unset)* | Force a specific note file |
+| `PI_PS_NOTE_GIT` | `1` | Set `0` to disable the git block |
+| `PI_PS_NOTE_TRIGGER_TURN` | `0` | Set `1` to wake the agent when the note file changes |
+| `PI_PS_NOTE_EDITOR` | `$EDITOR` / `$VISUAL` | Editor for `/note edit` |
 
 ## Opening a New PowerShell Tab
 
@@ -236,6 +285,10 @@ In `package.json` under `pi.ps`:
 | `PI_PS_LOAD_PROFILE` | 0 | Load user PS profile (default: -NoProfile) |
 | `PI_PS_ALIAS_FILE` | ~/.pi-ps/aliases.json | Custom alias file |
 | `PI_PS_TELEMETRY` | 0 | Enable local metrics recording |
+| `PI_PS_NOTE_PATH` | *(unset)* | Override note file path |
+| `PI_PS_NOTE_GIT` | 1 | Include compact git status in the note feed |
+| `PI_PS_NOTE_TRIGGER_TURN` | 0 | Wake agent when note file changes |
+| `PI_PS_NOTE_EDITOR` | `$EDITOR` | Editor for `/note edit` |
 
 ## Shell Resolution
 
@@ -273,7 +326,7 @@ npm run test:watch # vitest watch
 npm run typecheck  # tsc --noEmit
 ```
 
-127 tests covering:
+Tests covering:
 - Tokenizer (quoted args, pipes, redirections, `&&`/`||`, semicolons)
 - Every translation rule (+/- cases)
 - Idempotency (no double-rewrite)
@@ -283,6 +336,7 @@ npm run typecheck  # tsc --noEmit
   path escaping, startup command / run-pi)
 - Visible-window `run` (Start-Process launch, command embedding, quoting,
   error path)
+- Note paths, file IO, git porcelain parsing, payload format, prune
 
 ## Requirements
 

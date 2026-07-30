@@ -19,6 +19,7 @@ import { startJob, listJobs, getJobLog, killJob, cleanupJobs } from "./jobs/runn
 import { runDoctor, formatDoctor, recordTranslation } from "./diagnostics.js";
 import { recordMetric } from "./telemetry.js";
 import { openTab, runInWindow } from "./open-tab.js";
+import { registerNote } from "./note/register.js";
 
 // ── Settings ───────────────────────────────────────────────
 
@@ -54,13 +55,16 @@ function loadSettings(_pi: ExtensionAPI): PsSettings {
 export default function piPsExtension(pi: ExtensionAPI): void {
   const settings = loadSettings(pi);
 
+  // ── Note feed (works even without PowerShell) ───────────
+  const note = registerNote(pi);
+
   // ── Resolve shell ────────────────────────────────────────
   const shell = resolveShell();
 
   if (!shell) {
     pi.on("session_start", (_event, ctx) => {
       ctx.ui.notify(
-        "[pi-ps][error] No PowerShell found. pi-ps disabled.\n" +
+        "[pi-ps][error] No PowerShell found. PS routing disabled (note still active).\n" +
         "Set PI_PS_EXEC to your pwsh.exe path or install PowerShell 7+.",
         "error",
       );
@@ -92,7 +96,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
   // ── Register commands ───────────────────────────────────
 
   pi.registerCommand("ps", {
-    description: "ps: show status, doctor, translate, exec, new/clone tab, job management",
+    description: "ps: show status, doctor, translate, exec, new/clone tab, job, note",
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/);
       const sub = parts[0] ?? "";
@@ -203,10 +207,16 @@ export default function piPsExtension(pi: ExtensionAPI): void {
           break;
         }
 
+        case "note": {
+          // Delegate to the shared note handler (/note ...)
+          await note.handleCommand(parts.slice(1).join(" "), ctx);
+          break;
+        }
+
         default: {
           ctx.ui.notify(
             `[pi-ps] Unknown subcommand: ${sub}\n` +
-            `Available: status, doctor, translate, exec, new, clone, run, job`,
+            `Available: status, doctor, translate, exec, new, clone, run, job, note`,
             "warning",
           );
         }
