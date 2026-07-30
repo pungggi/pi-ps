@@ -70,6 +70,11 @@ function preferWritePath(
   };
 }
 
+/** Human-readable message from an unknown thrown value. */
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export interface NoteApi {
   /** Handle `/note ...` or `/ps note ...` args (without the leading "note"). */
   handleCommand: (args: string, ctx: NoteCtx) => Promise<void>;
@@ -212,9 +217,14 @@ export function registerNote(pi: ExtensionAPI): NoteApi {
     if (state.gitTimer) clearTimeout(state.gitTimer);
     state.gitTimer = setTimeout(async () => {
       state.gitTimer = null;
+      // Keep cwd/resolved in sync before refreshing — ctx.cwd may differ from
+      // state.cwd if the working directory changed mid-session, which would
+      // otherwise mix git status from one dir with a note resolved from another.
+      state.cwd = ctx.cwd;
+      state.resolved = resolveNotePath(state.cwd);
       try {
         const prevGit = state.gitLine;
-        const status = await getGitStatus(ctx.cwd);
+        const status = await getGitStatus(state.cwd);
         const nextGit = status ? formatGitLine(status) : null;
         if (nextGit === prevGit) return;
         state.gitLine = nextGit;
@@ -307,7 +317,9 @@ export function registerNote(pi: ExtensionAPI): NoteApi {
     switch (sub) {
       case "":
       case "show": {
-        const payload = state.payload ?? (await refresh({ reason: "show", cwd: ctx.cwd }));
+        // Always refresh from disk — the cached state.payload may be stale if
+        // the watcher missed an update.
+        const payload = await refresh({ reason: "show", cwd: ctx.cwd });
         ctx.ui.notify(payload.content, "info");
         break;
       }
@@ -318,14 +330,19 @@ export function registerNote(pi: ExtensionAPI): NoteApi {
           break;
         }
         const target = preferWritePath(ctx.cwd, state.resolved);
-        const note = writeNote(target.path, rest);
+        try {
+          writeNote(target.path, rest);
+        } catch (err) {
+          ctx.ui.notify(`[pi-ps note] write failed: ${errMsg(err)}`, "error");
+          break;
+        }
         state.resolved = target;
         const payload = await refresh({ reason: "set", cwd: ctx.cwd });
         state.lastSentContent = null;
         injectViaSend(payload);
         startWatcher(ctx);
         ctx.ui.notify(
-          `[pi-ps note] set (${target.source}) · ${note.mtime ?? formatTimestamp()}\n${payload.content}`,
+          `[pi-ps note] set (${target.source}) · ${payload.details.mtime ?? formatTimestamp()}\n${payload.content}`,
           "info",
         );
         break;
@@ -337,9 +354,14 @@ export function registerNote(pi: ExtensionAPI): NoteApi {
           break;
         }
         const target = preferWritePath(ctx.cwd, state.resolved);
-        const existing = readNote(target.path).body;
-        const merged = existing ? `${existing}\n${rest}` : rest;
-        writeNote(target.path, merged);
+        try {
+          const existing = readNote(target.path).body;
+          const merged = existing ? `${existing}\n${rest}` : rest;
+          writeNote(target.path, merged);
+        } catch (err) {
+          ctx.ui.notify(`[pi-ps note] write failed: ${errMsg(err)}`, "error");
+          break;
+        }
         state.resolved = target;
         const payload = await refresh({ reason: "append", cwd: ctx.cwd });
         state.lastSentContent = null;
@@ -351,7 +373,12 @@ export function registerNote(pi: ExtensionAPI): NoteApi {
 
       case "clear": {
         const target = preferWritePath(ctx.cwd, state.resolved);
-        clearNote(target.path);
+        try {
+          clearNote(target.path);
+        } catch (err) {
+          ctx.ui.notify(`[pi-ps note] clear failed: ${errMsg(err)}`, "error");
+          break;
+        }
         state.resolved = target;
         const payload = await refresh({ reason: "clear", cwd: ctx.cwd });
         state.lastSentContent = null;

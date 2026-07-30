@@ -78,23 +78,26 @@ export function buildPayload(input: NotePayloadInput): BuiltPayload {
   };
 }
 
-/** Keep only the newest pi-ps-note custom message in a message list. */
+/**
+ * Keep only the newest pi-ps-note custom message in a message list.
+ *
+ * Matches on `customType` alone — intentionally role-agnostic. The runtime
+ * should tag note messages with `role: "custom"`, but if it ever stores them
+ * with a different/missing role we still want to prune so notes don't
+ * accumulate in context.
+ */
 export function pruneNoteMessages<T extends { role?: string; customType?: string }>(
   messages: T[],
 ): T[] {
+  const isNote = (m: T | undefined): boolean => Boolean(m && m.customType === CUSTOM_TYPE);
+
   let lastIdx = -1;
   for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m && m.role === "custom" && m.customType === CUSTOM_TYPE) {
+    if (isNote(messages[i])) {
       lastIdx = i;
     }
   }
   if (lastIdx < 0) return messages;
 
-  return messages.filter((m, i) => {
-    if (m.role === "custom" && m.customType === CUSTOM_TYPE) {
-      return i === lastIdx;
-    }
-    return true;
-  });
+  return messages.filter((m, i) => (isNote(m) ? i === lastIdx : true));
 }

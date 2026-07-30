@@ -51,4 +51,12 @@ describe("readNote / writeNote", () => {
     expect(cleared.exists).toBe(true);
     expect(fs.readFileSync(p, "utf8")).toBe("");
   });
+
+  it("writeNote throws on an unwritable path (justifies command try/catch)", () => {
+    // Create a real file, then target a path nested beneath it.
+    const blocker = tmpFile("blocker");
+    writeNote(blocker, "x");
+    const under = path.join(blocker, "note.md");
+    expect(() => writeNote(under, "x")).toThrow();
+  });
 });

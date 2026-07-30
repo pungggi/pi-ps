@@ -86,4 +86,15 @@ describe("pruneNoteMessages", () => {
     const messages = [{ role: "user" as const }];
     expect(pruneNoteMessages(messages)).toBe(messages);
   });
+
+  it("prunes even when role is missing (role-agnostic match)", () => {
+    type Msg = { role?: string; customType?: string; content: string };
+    const messages: Msg[] = [
+      { customType: CUSTOM_TYPE, content: "old" },
+      { customType: CUSTOM_TYPE, content: "new" },
+    ];
+    const pruned = pruneNoteMessages(messages);
+    expect(pruned).toHaveLength(1);
+    expect(pruned[0]?.content).toBe("new");
+  });
 });
