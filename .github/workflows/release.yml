@@ -35,12 +35,12 @@ jobs:
       contents: read
       id-token: write # OIDC for trusted publishing + provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No registry-url here: setup-node would write
       #   //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
       # and an empty token silently breaks OIDC trusted publishing.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: npm
