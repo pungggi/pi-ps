@@ -148,6 +148,34 @@ describe("mode: hint", () => {
     expect(r.command).toBe("Get-Process");
     expect(r.hint).toBeUndefined();
   });
+
+  // ── Bash-only builtins (issue #2) ─────────────────
+  it("applies translation for bash-only builtins instead of running the invalid original", () => {
+    const r = hint('export PATH="/c/tools:$PATH"');
+    expect(r.command).toBe('$env:PATH = "C:\\tools;$env:PATH"');
+    expect(r.translated).toBe(true);
+    expect(r.hint!).toContain("applied");
+    expect(r.hint!).toContain("export");
+  });
+
+  it("applies translation for bare VAR= assignments in hint mode", () => {
+    const r = hint("FOO=bar ls");
+    expect(r.command).toBe("$env:FOO = bar; Get-ChildItem");
+    expect(r.translated).toBe(true);
+  });
+
+  it("still runs original for ordinary translatable commands", () => {
+    const r = hint("grep foo file.txt");
+    expect(r.command).toBe("grep foo file.txt");
+    expect(r.translated).toBe(false);
+  });
+
+  it("warns when a bash-only builtin has no translation", () => {
+    const r = hint("unset FOO");
+    expect(r.command).toBe("unset FOO");
+    expect(r.warning).toBeDefined();
+    expect(r.warning!).toContain("bash builtin");
+  });
 });
 
 // ── Basic commands (auto mode) ─────────────────────────────
@@ -204,7 +232,7 @@ describe("basic commands", () => {
 
   it("echo $HOME → Write-Output with env var", () => {
     const r = auto("echo $HOME");
-    expect(r.command).toContain("$env:HOME");
+    expect(r.command).toContain("$env:USERPROFILE");
   });
 
   it("mkdir mydir → New-Item -ItemType Directory", () => {
@@ -242,6 +270,59 @@ describe("basic commands", () => {
     const r = auto("export FOO=bar");
     expect(r.command).toContain("$env:FOO");
     expect(r.command).toContain("bar");
+  });
+
+  // ── export PATH normalization (issue #2) ────────────
+  it("export PATH: separator, mounts, and $HOME all normalized", () => {
+    const r = auto('export PATH="$HOME/flutter/bin:/c/Android/sdk/platform-tools:$PATH"');
+    expect(r.command).toBe(
+      '$env:PATH = "$env:USERPROFILE\\flutter\\bin;C:\\Android\\sdk\\platform-tools;$env:PATH"',
+    );
+  });
+
+  it("export PATH without quotes still normalized", () => {
+    expect(auto("export PATH=/c/tools:$PATH").command).toBe(
+      '$env:PATH = "C:\\tools;$env:PATH"',
+    );
+  });
+
+  it("export PATH: ~ expands to $env:USERPROFILE", () => {
+    expect(auto('export PATH="~/bin:$PATH"').command).toBe(
+      '$env:PATH = "$env:USERPROFILE\\bin;$env:PATH"',
+    );
+  });
+
+  it("export PATH: brace form ${HOME} converts", () => {
+    expect(auto('export PATH="${HOME}/bin:$PATH"').command).toBe(
+      '$env:PATH = "$env:USERPROFILE\\bin;$env:PATH"',
+    );
+  });
+
+  it("export PATH: leading mount without trailing slash", () => {
+    expect(auto("export PATH=/c:$PATH").command).toBe(
+      '$env:PATH = "C:\\;$env:PATH"',
+    );
+  });
+
+  it("bare PATH= assignment translates (no export keyword)", () => {
+    expect(auto("PATH=/c/tools:$PATH").command).toBe(
+      '$env:PATH = "C:\\tools;$env:PATH"',
+    );
+  });
+
+  it("assignment prefix before a command: FOO=bar ls", () => {
+    expect(auto("FOO=bar ls").command).toBe("$env:FOO = bar; Get-ChildItem");
+  });
+
+  it("assignment prefix inside a pipe chain", () => {
+    const r = auto("FOO=bar ls | grep x");
+    expect(r.command).toContain("$env:FOO = bar; ls");
+    expect(r.command).toContain("Where-Object");
+  });
+
+  it("export USER=alice keeps the var name; $USER in a value renames to $env:USERNAME", () => {
+    expect(auto("export USER=alice").command).toBe("$env:USER = alice");
+    expect(auto("export LOGNAME=$USER").command).toBe("$env:LOGNAME = $env:USERNAME");
   });
 
   it("which node → Get-Command", () => {

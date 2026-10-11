@@ -42,9 +42,29 @@ export function translate(input: string, mode: TranslateMode): TranslationResult
   const tokens = tokenize(input);
   const rewritten = rewriteTokens(tokens);
 
-  if (!rewritten.translated) return noChange;
+  if (!rewritten.translated) {
+    // Bash-only builtins that we could not translate will fail in PowerShell —
+    // say so instead of spawning a guaranteed "command not found".
+    if (isBashOnlyFirstToken(tokens)) {
+      return {
+        command: input,
+        translated: false,
+        warning: `'${tokens[0]!.value.split(/[=\s]/)[0]}' is a bash builtin with no PowerShell translation — command will likely fail`,
+      };
+    }
+    return noChange;
+  }
 
   if (mode === "hint") {
+    // The original is a bash-only builtin: PowerShell cannot run it at all,
+    // so apply the translation instead of executing a guaranteed-invalid line.
+    if (isBashOnlyFirstToken(tokens)) {
+      return {
+        command: rewritten.command,
+        hint: `applied (bash-only): ${input} → ${rewritten.command}`,
+        translated: true,
+      };
+    }
     return {
       command: input, // run original
       hint: `tip: ${rewritten.command}`,
@@ -290,6 +310,20 @@ function rewriteSingleCommand(tokens: Token[]): RewriteResult {
   if (tokens.length === 0) return { command: "", translated: false, warnings: [] };
 
   const cmd = tokens[0]!.value;
+
+  // Bash assignment: standalone `PATH=/c/tools:$PATH` or prefix `FOO=bar cmd`.
+  // PowerShell rejects `VAR=value` outright, so always rewrite to `$env:VAR = ...`.
+  const assign = cmd.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/s);
+  if (assign) {
+    const [, name, rawValue] = assign;
+    const value = isPathListVar(name!) ? convertPathListValue(rawValue!) : convertEnvVars(rawValue!);
+    if (tokens.length === 1) {
+      return { command: `$env:${name} = ${value}`, translated: true, warnings: [] };
+    }
+    const inner = rewriteSingleCommand(tokens.slice(1));
+    return { command: `$env:${name} = ${value}; ${inner.command}`, translated: true, warnings: [] };
+  }
+
   const args = tokens.slice(1).map((t) => t.value);
   const rest = args.join(" ");
 
@@ -351,6 +385,16 @@ function warn(result: string, ...msgs: string[]): RuleResult {
 
 function applyBuiltinRules(cmd: string, args: string[], rest: string): RuleResult | null {
   const first = args[0] ?? "";
+
+  // Bash assignment prefix inside a pipe segment: `FOO=bar ls | grep x`.
+  // `;` after the assignment is fine — PowerShell parses the rest as a new
+  // statement, so the pipe chain still applies to the command only.
+  const assign = cmd.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/s);
+  if (assign) {
+    const [, name, rawValue] = assign;
+    const value = isPathListVar(name!) ? convertPathListValue(rawValue!) : convertEnvVars(rawValue!);
+    return ok(`$env:${name} = ${value}${rest ? `; ${rest}` : ""}`);
+  }
 
   switch (cmd) {
     // ── ls ────────────────────────────────────────────────
@@ -475,9 +519,12 @@ function applyBuiltinRules(cmd: string, args: string[], rest: string): RuleResul
 
     // ── export ────────────────────────────────────────────
     case "export": {
-      const m = rest.match(/^(\w+)=(.*)/s);
+      const m = rest.match(/^(\w+)=(.*)$/s);
       if (!m) return null;
-      return ok(`$env:${m[1]} = ${convertEnvVars(m[2]!)}`);
+      // PATH-style values keep POSIX semantics (":" separator, /c/ mounts,
+      // $HOME) — normalize them for Windows (issue #2).
+      const value = isPathListVar(m[1]!) ? convertPathListValue(m[2]!) : convertEnvVars(m[2]!);
+      return ok(`$env:${m[1]} = ${value}`);
     }
 
     // ── head ──────────────────────────────────────────────
@@ -790,6 +837,60 @@ function extractFlags(args: string[]): Set<string> {
   return flags;
 }
 
+// ── Environment assignment helpers (issue #2) ──────────────
+
+/** Bash builtins that can never resolve as a PowerShell command */
+const BASH_ONLY_BUILTINS = new Set([
+  "export", "unset", "readonly", "declare", "local", "shift", "source",
+]);
+
+/** First token is a bash-only builtin or a `VAR=` assignment prefix */
+function isBashOnlyFirstToken(tokens: Token[]): boolean {
+  const first = tokens[0];
+  if (!first || first.type !== "word") return false;
+  if (BASH_ONLY_BUILTINS.has(first.value)) return true;
+  return /^[A-Z_][A-Z0-9_]*=/.test(first.value);
+}
+
+/** bash var → Windows env var with a different name */
+const ENV_RENAMES: Record<string, string> = {
+  HOME: "USERPROFILE",
+  USER: "USERNAME",
+};
+
+/** PATH-style vars: separator list of paths needing Windows normalization */
+function isPathListVar(name: string): boolean {
+  return /path$/i.test(name);
+}
+
+/** Git-Bash mount `/c/...` → drive-letter path `C:\...` (single drive letter only) */
+function convertMountPath(s: string): string {
+  const m = s.match(/^\/([a-zA-Z])(?:\/(.*))?$/);
+  if (!m) return s;
+  const rest = m[2] ? m[2]!.replace(/\//g, "\\") : "";
+  return `${m[1]!.toUpperCase()}:\\${rest}`;
+}
+
+/** Normalize one PATH entry: env vars → mount → backslashes */
+function normalizePathSegment(seg: string): string {
+  const expanded = seg.startsWith("~") ? seg.replace(/^~/, "$HOME") : seg;
+  const envConverted = convertEnvVars(expanded);
+  return slashToBackslash(convertMountPath(envConverted));
+}
+
+/**
+ * Convert a POSIX PATH-style value (`:`-separated) to a Windows one
+ * (`;`-separated, drive letters, backslashes, PS env syntax).
+ * Always emitted double-quoted: unquoted `;` would end the statement.
+ */
+function convertPathListValue(raw: string): string {
+  let v = raw.trim();
+  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
+    v = v.slice(1, -1);
+  }
+  return `"${v.split(":").map(normalizePathSegment).join(";")}"`;
+}
+
 function convertEnvVars(s: string): string {
   const known = [
     "HOME", "USER", "PATH", "PWD", "SHELL", "TERM",
@@ -797,7 +898,11 @@ function convertEnvVars(s: string): string {
     "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "SYSTEMROOT",
     "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
   ];
-  return s.replace(/\$([A-Z_][A-Z0-9_]*)/g, (match, varName: string) => {
+  // Matches $VAR and ${VAR}; renames vars that do not exist on Windows.
+  return s.replace(/\$([A-Z_][A-Z0-9_]*)|\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, plain?: string, braced?: string) => {
+    const varName = plain ?? braced ?? "";
+    const renamed = ENV_RENAMES[varName];
+    if (renamed) return `$env:${renamed}`;
     if (known.includes(varName)) return `$env:${varName}`;
     return match;
   });

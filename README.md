@@ -152,7 +152,7 @@ Set via `PI_PS_TRANSLATE` env var or `pi.ps.translate` in package.json:
 | Mode | Behavior |
 |------|----------|
 | `off` | Pass command verbatim to PowerShell |
-| `hint` *(default)* | Detect bash idioms, run as-is, append PS tip to stderr |
+| `hint` *(default)* | Detect bash idioms, run as-is, append PS tip to stderr. Bash-only builtins (e.g. `export`) are translated **and applied**, since PowerShell cannot run the original |
 | `auto` | Rewrite bash to PS, run the PS version |
 
 ## Translation Support
@@ -176,7 +176,9 @@ Set via `PI_PS_TRANSLATE` env var or `pi.ps.translate` in package.json:
 | `which cmd` | `Get-Command \| Select-Object -ExpandProperty Source` |
 | `ps` | `Get-Process` |
 | `env` | `Get-ChildItem Env:` |
-| `export VAR=val` | `$env:VAR = val` |
+| `export VAR=val` | `$env:VAR = val` (`$HOME`→`$env:USERPROFILE`, `$USER`→`$env:USERNAME` in values) |
+| `export PATH="$HOME/x:/c/y:$PATH"` | `$env:PATH = "$env:USERPROFILE\x;C:\y;$env:PATH"` (`:`→`;`, Git-Bash mounts → drive letters, backslashes) |
+| `VAR=val cmd` | `$env:VAR = val; cmd` (bash assignments can't run in PowerShell) |
 | `date` | `Get-Date` |
 | `whoami` | `[WindowsIdentity]::GetCurrent().Name` |
 | `sleep 5` | `Start-Sleep -Seconds 5` |
