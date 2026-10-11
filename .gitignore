@@ -3,3 +3,5 @@ nul
 .pi/
 *.log
 .DS_Store
+dist/
+$null

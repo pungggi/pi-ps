@@ -14,6 +14,7 @@ git tag v3.1.0 && git push origin v3.1.0
         │
         ▼
 release.yml  ──►  npm ci → typecheck → test → version-sync check → npm publish --provenance
+                  (prepack hook runs `tsc` → dist/ before the tarball is packed)
                                                                       │
                                                                       ▼
                                                             npmjs.com/package/pi-powershell
