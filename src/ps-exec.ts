@@ -7,7 +7,9 @@
 
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import type { ResolvedShell } from "./shell-resolve.js";
-import { translate } from "./translator/index.js";
+// Type-only: the translator is loaded lazily inside exec() so it stays off
+// the extension startup critical path (pi-ps#4).
+import type { TranslateMode } from "./translator/index.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -17,7 +19,7 @@ export interface PsExecOptions {
   timeout?: number;
   env?: NodeJS.ProcessEnv;
   /** Translation mode: off | hint | auto */
-  translateMode: "off" | "hint" | "auto";
+  translateMode: TranslateMode;
   /** Enable $ErrorActionPreference = 'Stop' */
   strict: boolean;
   /** Enable UTF-8 prefix */
@@ -36,12 +38,15 @@ export interface PsExecResult {
  * Execute a command through PowerShell, returning operations that
  * conform to pi's BashOperations interface.
  */
-export function exec(
+export async function exec(
   shell: ResolvedShell,
   command: string,
   cwd: string,
   options: PsExecOptions,
 ): Promise<PsExecResult> {
+  // Lazy: the translator is the heaviest module in pi-ps and is only needed
+  // once a command actually executes — never at startup (pi-ps#4).
+  const { translate } = await import("./translator/index.js");
   return new Promise((resolve) => {
     // ── Translation ───────────────────────────────────────
     const tResult = translate(command, options.translateMode);
@@ -152,7 +157,7 @@ function killTree(child: ChildProcess, useTreeKill: boolean): void {
  */
 export function createExecOps(
   shell: ResolvedShell,
-  translateMode: "off" | "hint" | "auto",
+  translateMode: TranslateMode,
   strict: boolean,
   utf8: boolean,
   killTreeOnAbort: boolean,

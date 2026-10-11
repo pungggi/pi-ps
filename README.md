@@ -38,6 +38,12 @@ Or local development:
 pi -e ./src/extension.ts
 ```
 
+### Development
+
+- **Entry point**: the published package loads `./dist/extension.js` (precompiled). Run `npm run build` to regenerate `dist/` from `src/`.
+- **Why dist?**: precompiled JavaScript skips pi's jiti transpile and keeps heavy modules behind dynamic imports, so the extension adds ~30ms to pi startup instead of ~600ms (pi-ps#4).
+- **Tests**: `npm test` (vitest), `npm run typecheck` (tsc).
+
 ## Commands
 
 | Command | Description |

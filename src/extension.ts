@@ -12,13 +12,12 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolveShell, type ResolvedShell } from "./shell-resolve.js";
+import { resolveShellAsync, type ResolvedShell } from "./shell-resolve.js";
 import { createExecOps } from "./ps-exec.js";
-import { translate, type TranslateMode } from "./translator/index.js";
-import { startJob, listJobs, getJobLog, killJob, cleanupJobs } from "./jobs/runner.js";
-import { runDoctor, formatDoctor, recordTranslation } from "./diagnostics.js";
-import { recordMetric } from "./telemetry.js";
-import { openTab, runInWindow } from "./open-tab.js";
+// Type-only: heavy modules (translator, jobs, diagnostics, telemetry,
+// open-tab) are dynamic-imported inside the handlers that need them, so pi's
+// synchronous extension load stays fast (pi-ps#4).
+import type { TranslateMode } from "./translator/index.js";
 
 // ── Settings ───────────────────────────────────────────────
 
@@ -54,39 +53,48 @@ function loadSettings(_pi: ExtensionAPI): PsSettings {
 export default function piPsExtension(pi: ExtensionAPI): void {
   const settings = loadSettings(pi);
 
-  // ── Resolve shell ────────────────────────────────────────
-  const shell = resolveShell();
-
-  if (!shell) {
-    pi.on("session_start", (_event, ctx) => {
+  // ── Shell resolution: lazy, async, off the startup path (pi-ps#4) ──
+  // Probing spawns where.exe/pwsh.exe (~0.5s), so it must not run in the
+  // factory (pi awaits it synchronously) or in an awaited event handler.
+  // Instead: warm the cache in the background on session_start and await the
+  // shared promise on first real use (user_bash, /ps commands).
+  pi.on("session_start", (_event, ctx) => {
+    void resolveShellAsync().then((shell) => {
+      if (!shell) {
+        ctx.ui.notify(
+          "[pi-ps][error] No PowerShell found. pi-ps disabled.\n" +
+          "Set PI_PS_EXEC to your pwsh.exe path or install PowerShell 7+.",
+          "error",
+        );
+        return;
+      }
       ctx.ui.notify(
-        "[pi-ps][error] No PowerShell found. pi-ps disabled.\n" +
-        "Set PI_PS_EXEC to your pwsh.exe path or install PowerShell 7+.",
-        "error",
+        `[pi-ps] ${shell.isPwsh7 ? "pwsh" : "Windows PowerShell"} ${shell.version} at ${shell.exe}`,
+        "info",
       );
     });
-    return;
-  }
-
-  // Log version at startup
-  pi.on("session_start", (_event, ctx) => {
-    ctx.ui.notify(
-      `[pi-ps] ${shell.isPwsh7 ? "pwsh" : "Windows PowerShell"} ${shell.version} at ${shell.exe}`,
-      "info",
-    );
   });
 
-  // ── Register user_bash handler ──────────────────────────
-  const execOps = createExecOps(
-    shell,
-    settings.translate,
-    settings.strict,
-    settings.utf8,
-    settings.killTreeOnAbort,
-  );
+  // ── user_bash handler ────────────────────────────────────
+  // Async handler: pi awaits it, and returning undefined falls back to pi's
+  // default execution — preserving the old behavior where the extension
+  // registered no handler at all when no PowerShell was found.
+  let execOps: ReturnType<typeof createExecOps> | null = null;
+  const getExecOps = (shell: ResolvedShell) => {
+    execOps ??= createExecOps(
+      shell,
+      settings.translate,
+      settings.strict,
+      settings.utf8,
+      settings.killTreeOnAbort,
+    );
+    return execOps;
+  };
 
-  pi.on("user_bash", (_event, _ctx) => {
-    return { operations: execOps };
+  pi.on("user_bash", async (_event, _ctx) => {
+    const shell = await resolveShellAsync();
+    if (!shell) return undefined;
+    return { operations: getExecOps(shell) };
   });
 
   // ── Register commands ───────────────────────────────────
@@ -94,6 +102,16 @@ export default function piPsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("ps", {
     description: "ps: show status, doctor, translate, exec, new/clone tab, job management",
     handler: async (args, ctx) => {
+      const shell = await resolveShellAsync();
+      if (!shell) {
+        ctx.ui.notify(
+          "[pi-ps][error] No PowerShell found. pi-ps disabled.\n" +
+          "Set PI_PS_EXEC to your pwsh.exe path or install PowerShell 7+.",
+          "error",
+        );
+        return;
+      }
+
       const parts = args.trim().split(/\s+/);
       const sub = parts[0] ?? "";
 
@@ -115,6 +133,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
         }
 
         case "doctor": {
+          const { runDoctor, formatDoctor } = await import("./diagnostics.js");
           const result = runDoctor(shell);
           ctx.ui.notify(formatDoctor(result), "info");
           break;
@@ -126,6 +145,10 @@ export default function piPsExtension(pi: ExtensionAPI): void {
             ctx.ui.notify("Usage: /ps translate \"<bash command>\"", "error");
             break;
           }
+          const [{ translate }, { recordTranslation }] = await Promise.all([
+            import("./translator/index.js"),
+            import("./diagnostics.js"),
+          ]);
           const tResult = translate(cmd, "auto");
           if (tResult.translated) {
             ctx.ui.notify(
@@ -151,11 +174,12 @@ export default function piPsExtension(pi: ExtensionAPI): void {
           // H-6: use execOps which streams through pi's onData pipeline
           const startTime = Date.now();
           const outputChunks: Buffer[] = [];
-          execOps.exec(cmd, ctx.cwd, {
+          getExecOps(shell).exec(cmd, ctx.cwd, {
             onData: (data) => { outputChunks.push(data); },
             signal: ctx.signal,
-          }).then((result) => {
+          }).then(async (result) => {
             const duration = Date.now() - startTime;
+            const { recordMetric } = await import("./telemetry.js");
             recordMetric({ command: cmd, translated: false, exitCode: result.exitCode, durationMs: duration });
 
             // Show output as a single notify
@@ -177,6 +201,7 @@ export default function piPsExtension(pi: ExtensionAPI): void {
           // (terminal → cwd → pi → Enter). new stays a plain shell unless
           // runPi / PI_PS_RUN_PI is on. -NoExit keeps PS open after pi exits.
           const launchPi = sub === "clone" || settings.runPi;
+          const { openTab } = await import("./open-tab.js");
           const result = await openTab({
             mode: sub,
             cwd: ctx.cwd,
@@ -193,13 +218,14 @@ export default function piPsExtension(pi: ExtensionAPI): void {
             ctx.ui.notify('Usage: /ps run "<command>"  (opens a live window)', "error");
             break;
           }
+          const { runInWindow } = await import("./open-tab.js");
           const result = await runInWindow({ command: cmd, cwd: ctx.cwd, shell });
           ctx.ui.notify(`[pi-ps] ${result.message}`, result.ok ? "info" : "error");
           break;
         }
 
         case "job": {
-          handleJobCommand(parts.slice(1), ctx, shell);
+          await handleJobCommand(parts.slice(1), ctx, shell);
           break;
         }
 
@@ -216,11 +242,12 @@ export default function piPsExtension(pi: ExtensionAPI): void {
 
   // ── Job subcommand handler ──────────────────────────────
 
-  function handleJobCommand(
+  async function handleJobCommand(
     parts: string[],
     ctx: { cwd: string; ui: { notify: (msg: string, type?: "error" | "info" | "warning") => void } },
     shell: ResolvedShell,
-  ): void {
+  ): Promise<void> {
+    const { startJob, listJobs, getJobLog, killJob, cleanupJobs } = await import("./jobs/runner.js");
     const sub = parts[0] ?? "list";
 
     switch (sub) {
