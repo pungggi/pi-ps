@@ -879,16 +879,52 @@ function normalizePathSegment(seg: string): string {
 }
 
 /**
+ * Split a POSIX path list on `:`, but keep colons that belong to Windows
+ * syntax: PS env refs (`$env:PATH`) and drive letters (`C:\tools`).
+ */
+function splitPathList(v: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (let i = 0; i < v.length; i++) {
+    const ch = v[i]!;
+    if (ch !== ":") {
+      cur += ch;
+      continue;
+    }
+    // `$env:NAME` — the colon is part of the variable reference
+    if (v.startsWith("$env:", i - 4)) {
+      cur += ch;
+      continue;
+    }
+    // Drive letter: single letter at a list boundary followed by `\` or `/`
+    const prev = v[i - 1] ?? "";
+    const boundary = i <= 1 || /["';\s]/.test(v[i - 2]!);
+    if (/^[A-Za-z]$/.test(prev) && boundary && /[\\/]/.test(v[i + 1] ?? "")) {
+      cur += ch;
+      continue;
+    }
+    out.push(cur);
+    cur = "";
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
  * Convert a POSIX PATH-style value (`:`-separated) to a Windows one
  * (`;`-separated, drive letters, backslashes, PS env syntax).
  * Always emitted double-quoted: unquoted `;` would end the statement.
  */
 function convertPathListValue(raw: string): string {
   let v = raw.trim();
-  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
-    v = v.slice(1, -1);
-  }
-  return `"${v.split(":").map(normalizePathSegment).join(";")}"`;
+  // Strip surrounding quotes even when unbalanced: a truncated line that lost
+  // its closing quote must not re-wrap into `""…""` (ParserError, #6).
+  v = v.replace(/^["']+/, "").replace(/["']+$/, "");
+  // Bash `\"` inside double quotes is a literal quote — unescape it.
+  v = v.replace(/\\"/g, '"');
+  const joined = splitPathList(v).map(normalizePathSegment).join(";");
+  // A surviving inner `"` must not terminate the emitted PS string
+  return `"${joined.replace(/"/g, '`"')}"`;
 }
 
 function convertEnvVars(s: string): string {
