@@ -310,6 +310,37 @@ describe("basic commands", () => {
     );
   });
 
+  // ── PATH quoting robustness (issue #6: doubled-quote ParserError) ──
+  it("unterminated quote in PATH value never emits doubled quotes", () => {
+    // A truncated line lost its closing quote — output must stay parseable
+    expect(auto('export PATH="$HOME\\.cargo\\bin:$PATH').command).toBe(
+      '$env:PATH = "$env:USERPROFILE\\.cargo\\bin;$env:PATH"',
+    );
+    const r = auto('export PATH="$HOME\\.cargo\\bin');
+    expect(r.command).toBe('$env:PATH = "$env:USERPROFILE\\.cargo\\bin"');
+    expect(r.command).not.toContain('""');
+  });
+
+  it("trailing backslash before closing quote stays parseable", () => {
+    // `\"` looks like an escaped quote to bash — the rest of the line gets
+    // swallowed into the value; the emitted PS must still parse.
+    const r = auto('PATH="$HOME\\.cargo\\bin\\" explorer .');
+    expect(r.command.startsWith('$env:PATH = "$env:USERPROFILE\\.cargo\\bin')).toBe(true);
+    expect(r.command).not.toContain('""');
+  });
+
+  it("$env: refs in a PATH value are not split on their colon", () => {
+    expect(auto('export PATH="$env:USERPROFILE\\.cargo\\bin;$PATH"').command).toBe(
+      '$env:PATH = "$env:USERPROFILE\\.cargo\\bin;$env:PATH"',
+    );
+  });
+
+  it("drive-letter colons in a PATH value are not treated as separators", () => {
+    expect(auto('export PATH="$PATH;C:\\Tools\\bin"').command).toBe(
+      '$env:PATH = "$env:PATH;C:\\Tools\\bin"',
+    );
+  });
+
   it("assignment prefix before a command: FOO=bar ls", () => {
     expect(auto("FOO=bar ls").command).toBe("$env:FOO = bar; Get-ChildItem");
   });
